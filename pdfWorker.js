@@ -5,8 +5,9 @@
 // returns PNG blobs. This is the real PDF-upscaling path the current app lacks
 // (its PDF branch only repackages the file). Also the OffscreenCanvas+Worker
 // pattern recommended for 8K image upscaling.
-// DEPENDENCIES (pending): `pdfjs-dist`; currently fetches the pdf.js worker from
-// unpkg (external CDN) — consider bundling locally. See PROJECT_TRACKER.md.
+// DEPENDENCIES: `pdfjs-dist` (installed). The pdf.js worker is bundled locally
+// (no CDN). Still PENDING: wire enhancePDF() into the app's PDF branch + create
+// the worker as { type: 'module' }. See PROJECT_TRACKER.md.
 
 self.onmessage = async (e) => {
   const { fd, scale } = e.data;
@@ -19,14 +20,12 @@ self.onmessage = async (e) => {
     const fileBlob = new Blob([fd], { type: 'application/pdf' });
     const pdfData = new Uint8Array(await fileBlob.arrayBuffer());
 
-    // Dynamically import pdfjs-dist
+    // pdf.js + its worker, both bundled LOCALLY via the installed pdfjs-dist
+    // package (no external CDN). Vite resolves the ?url import to a same-origin
+    // asset, which satisfies the app's CSP (connect-src 'self').
     const pdfjs = await import('pdfjs-dist');
-
-    // Fetch the worker script and create a Blob URL
-    const workerSrcResponse = await fetch('https://unpkg.com/pdfjs-dist@4.4.168/build/pdf.worker.min.js');
-    const workerSrcBlob = await workerSrcResponse.blob();
-    const workerSrc = URL.createObjectURL(workerSrcBlob);
-    pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
+    const workerUrl = (await import('pdfjs-dist/build/pdf.worker.min.mjs?url')).default;
+    pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
     const pdf = await pdfjs.getDocument(pdfData).promise;
     const pages = [];

@@ -70,8 +70,10 @@ PDF), pick a scale, run a multi-stage pipeline (ingest → scan → analysis →
       `OffscreenCanvas` so big jobs never block the UI (pattern already in
       `pdfWorker.js`). Auto-skip JS denoise/sharpen above ~16MP.
 - [ ] **Real PDF upscaling** — integrate the salvaged worker (§5).
-- [ ] **Remove the dead "AI (API KEY)" browser-fetch mode** (or move analysis to
-      a real backend if AI analysis is wanted).
+- [x] **Removed the "AI (API KEY)" browser-fetch mode** (2026-06-04) — analysis
+      is now 100% local; eliminated the client-side API-key exposure risk.
+- [x] **Bundled pdf.js locally** (2026-06-04) — added `pdfjs-dist`, dropped the
+      unpkg CDN fetch in `pdfWorker.js` (supply-chain risk removed).
 - [ ] **Ship to GitHub** — `.gitignore` node_modules/dist, `git rm -r --cached
       node_modules`, add remote, reconcile + push to `rled7/nexus-scale`.
 - [ ] (stretch) **WebAssembly hot path** — port the bicubic/convolution kernels

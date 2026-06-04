@@ -52,7 +52,6 @@ export default function NexusScale(){
   const [err,      setErr]        = useState(null);
   const [isBenchmarking,setIsBenchmarking] = useState(false);
   const [bmResults,setBmResults]  = useState([]);
-  const [offlineMode,  setOfflineMode]   = useState(true);
   const [agentMode,    setAgentMode]     = useState(false);
   const [agentResults, setAgentResults]  = useState(null);
   const [learningSuggestion, setLearningSuggestion] = useState(null);
@@ -242,50 +241,19 @@ export default function NexusScale(){
 
       // ── STAGE 3: NEURAL ANALYSIS ──────────────────────────────────────────
       setStage("neural");
-      addLog("Connecting to Claude Neural Vision Engine...","sys");
+      addLog("Running local vision analysis...","sys");
       await delay(200); if(!pipelineActive.current) return null;
 
-      // callClaude — fetch with 30s AbortController timeout
-      const callClaude=async(msgs)=>{
-        try{
-          const ctrl=new AbortController();
-          const timer=setTimeout(()=>ctrl.abort(),30000);
-          let res;
-          try{
-            res=await fetch("https://api.anthropic.com/v1/messages",{
-              method:"POST",
-              headers:{"Content-Type":"application/json"},
-              signal:ctrl.signal,
-              body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,messages:msgs}),
-            });
-          }finally{ clearTimeout(timer); }
-          const raw=await res.text();
-          if(!res.ok){ addLog(`API HTTP ${res.status}`,"warn"); return null; }
-          let data; try{ data=JSON.parse(raw); }catch{ addLog("Response not JSON","warn"); return null; }
-          if(data.type==="error"||data.error){ addLog(`API: ${data.error?.message||"error"}`,"warn"); return null; }
-          const text=(data.content||[]).map(b=>b.type==="text"?b.text:"").join("")||"";
-          if(!text){ addLog("Empty API response","warn"); return null; }
-          const clean=text.replace(/```json\s*/gi,"").replace(/```\s*/g,"").trim();
-          const s=clean.indexOf("{"),e=clean.lastIndexOf("}");
-          if(s===-1||e===-1){ addLog("No JSON in response","warn"); return null; }
-          try{ return JSON.parse(clean.slice(s,e+1)); }catch(je){ addLog(`JSON parse: ${je.message}`,"warn"); return null; }
-        }catch(fe){ addLog(`Fetch: ${fe.message}`,"warn"); return null; }
-      };
-
+      // Analysis is 100% local — no network calls. (A browser cannot safely
+      // call a hosted AI API: the key would be exposed in client JS. If AI
+      // analysis is ever wanted, proxy it through a backend that holds the key.)
       let analysis=null;
-      const mt=fd.type==="image/jpeg"?"image/jpeg":fd.type==="image/png"?"image/png":fd.type==="image/webp"?"image/webp":fd.type==="image/gif"?"image/gif":"image/jpeg";
 
       if(fd.isImg){
-        if(!fd.b64||fd.b64.length<10){ addLog("Image payload missing — skipping neural analysis","warn"); }
-        else if(offlineMode){
-          addLog("Running local image analysis (offline mode)...","info");
+        if(!fd.b64||fd.b64.length<10){ addLog("Image payload missing — skipping analysis","warn"); }
+        else{
+          addLog("Running local image analysis...","info");
           analysis=analyzeLocally(fd);
-        } else{
-          addLog("Sending image to vision engine...","info");
-          analysis=await callClaude([{role:"user",content:[
-            {type:"image",source:{type:"base64",media_type:mt,data:fd.b64}},
-            {type:"text",text:`You are an image forensics AI. Analyze this image and respond ONLY with a single valid JSON object matching this schema exactly — no markdown, no extra text: ${JSON_SCHEMA}`}
-          ]}]);
         }
       } else if(fd.isPdf){
         // Pure local PDF analyzer — zero network calls
@@ -328,13 +296,8 @@ export default function NexusScale(){
         };
         addLog(`${docType} · ${estPages}p · ~${estDpi}DPI`,"ok");
       } else {
-        if(offlineMode){
-          addLog("Unknown file type — local metadata analysis (offline)...","info");
-          analysis=FALLBACK_ANALYSIS;
-        } else {
-          addLog("Unknown file type — metadata analysis...","info");
-          analysis=await callClaude([{role:"user",content:`File: name="${fd.name}", type="${fd.type}", size=${fmt(fd.size)}. Respond ONLY with valid JSON: ${JSON_SCHEMA}`}]);
-        }
+        addLog("Unknown file type — local metadata analysis...","info");
+        analysis=FALLBACK_ANALYSIS;
       }
 
       if(!analysis){ addLog("Using built-in defaults","warn"); analysis=FALLBACK_ANALYSIS; }
@@ -645,14 +608,6 @@ export default function NexusScale(){
                   <button key={v} style={{...S.optBtn,...(algo===v?S.optBtnOn:{}),...(v==="bicubic"?{fontSize:"8px"}:{})}} onClick={()=>setAlgo(v)}>{l}</button>
                 ))}
               </div>
-            </div>
-            <div style={S.paramGroup}>
-              <div style={S.paramHead}>ANALYSIS MODE</div>
-              <div style={S.btnRow}>
-                <button style={{...S.optBtn,...(offlineMode?S.optBtnOn:{})}} onClick={()=>setOfflineMode(true)}>LOCAL</button>
-                <button style={{...S.optBtn,...(!offlineMode?S.optBtnOn:{})}} onClick={()=>setOfflineMode(false)}>AI (API KEY)</button>
-              </div>
-              {!offlineMode&&<div style={{fontSize:"8px",color:"#ff6b35",marginTop:"4px"}}>⚠ Requires ANTHROPIC_API_KEY</div>}
             </div>
             <div style={S.paramGroup}>
               <div style={S.paramHead}>SHARPEN <span style={S.pval}>{sharpen.toFixed(1)}</span></div>
