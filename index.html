@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Security hardening (defense-in-depth). connect-src 'self' blocks the
+         browser-direct api.anthropic.com call and the unpkg CDN fetch by design.
+         NOTE: `npm run dev` HMR may need this relaxed — test prod with
+         `npm run preview`, or move CSP to host headers (e.g. Cloudflare _headers). -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" />
+    <meta name="referrer" content="no-referrer" />
+    <title>Nexus Scale</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

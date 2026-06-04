@@ -1,0 +1,17 @@
+export const DOC_TYPES = [
+  {keys:["invoice","receipt","bill","payment","purchase","order"],   type:"Financial Document",       cat:"document", issues:["Low-contrast receipt scan","Currency figures blurry"],         gaps:["Total legibility","Line items clarity"]},
+  {keys:["contract","agreement","nda","terms","lease","deed"],       type:"Legal Contract",           cat:"document", issues:["Dense text compressed","Signature fields degraded"],           gaps:["Signature block","Clause numbering"]},
+  {keys:["report","summary","analysis","audit","review"],            type:"Analytical Report",        cat:"document", issues:["Tables rasterized at low DPI"],                                gaps:["Chart labels","Table borders"]},
+  {keys:["resume","cv","curriculum","vitae","portfolio"],            type:"Resume / CV",              cat:"document", issues:["Formatting disrupted on scan"],                                gaps:["Contact details","Section headers"]},
+  {keys:["thesis","dissertation","paper","research","journal"],      type:"Academic Document",        cat:"document", issues:["Equations/figures low-res"],                                  gaps:["Formula rendering","Citation numbers"]},
+  {keys:["manual","guide","handbook","instruction","tutorial"],      type:"Technical Manual",         cat:"document", issues:["Diagrams pixelated"],                                          gaps:["Figure labels","Step numbering"]},
+  {keys:["patent","claim","invention","application","provisional"],  type:"Patent Document",          cat:"document", issues:["Technical drawings low DPI"],                                 gaps:["Drawing reference numbers","Claim structure"]},
+  {keys:["certificate","diploma","license","award","degree"],        type:"Certificate / Credential", cat:"document", issues:["Embossed seal may not scan well"],                            gaps:["Seal clarity","Signature legibility"]},
+  {keys:["form","questionnaire","survey","w2","1099"],               type:"Form / Application",       cat:"document", issues:["Form fields merge with background"],                           gaps:["Field boundaries","Handwritten entries"]},
+  {keys:["letter","memo","notice","correspondence"],                 type:"Correspondence",           cat:"document", issues:["Low-contrast letterhead"],                                    gaps:["Letterhead quality","Address block"]},
+  {keys:["map","plan","blueprint","schematic","floor","layout"],     type:"Technical Drawing",        cat:"technical",issues:["Fine lines lost in compression"],                             gaps:["Dimension labels","Scale indicator"]},
+  {keys:["book","chapter","novel","textbook","edition"],             type:"Book / Publication",       cat:"document", issues:["Spine shadow distorts columns","Page curl artifact"],          gaps:["Page numbers","Margin notes"]},
+  {keys:["scan","scanned","copy","xerox","photocopy"],               type:"Scanned Document",         cat:"document", issues:["Moiré patterns","Skew and noise from scanner"],               gaps:["Background noise removal","Deskew"]},
+  {keys:["medical","record","prescription","diagnosis","lab","xray"],type:"Medical Document",         cat:"medical",  issues:["PHI may need redaction","Low contrast imaging"],              gaps:["Numeric values","Signature fields"]},
+  {keys:["financial","statement","balance","sheet","quarterly"],     type:"Financial Statement",      cat:"document", issues:["Small numeric tables compressed"],                             gaps:["Figure accuracy","Header rows"]},
+];
