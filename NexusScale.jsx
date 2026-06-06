@@ -10,6 +10,7 @@ import {
   clamp,
   nearestNeighbor, bilinear, bicubic,
   applyUnsharpMask, applyDenoise, enhanceContrast,
+  resizePixels, targetDims, MAX_PIXELS,
 } from "./imageProcessing/index.js";
 import { qualityScore } from "./imageProcessing/qualityMetrics.js";
 import { BrowserLogger } from "./BrowserLogger.js";
@@ -37,6 +38,7 @@ function makeThumbnail(pixelData, w, h, maxW = 120) {
 export default function NexusScale(){
   const [fileData, setFileData]   = useState(null);
   const [scale,    setScale]      = useState(2);
+  const [target,   setTarget]     = useState(null); // null = multiplier mode; "4K"/"8K" = resolution target
   const [algo,     setAlgo]       = useState("bicubic");
   const [sharpen,  setSharpen]    = useState(0.4);
   const [denoise,  setDenoise]    = useState(0.2);
@@ -174,6 +176,10 @@ export default function NexusScale(){
   const runPipelineWith=useCallback(async(fdOverride=null,cfgOverride=null)=>{
     const fd  =fdOverride||fileData;
     const sc  =cfgOverride?.scale   ??scale;
+    // target precedence INTENTIONALLY differs from scale's `??` fallback: programmatic
+    // callers (e.g. the benchmark suite) must not inherit a UI-selected target from
+    // state, so they default to multiplier mode unless they explicitly pass `target`.
+    const tg  =cfgOverride ? (cfgOverride.target ?? null) : target;
     const al  =cfgOverride?.algo    ??algo;
     const sh  =cfgOverride?.sharpen ??sharpen;
     const dn  =cfgOverride?.denoise ??denoise;
@@ -359,22 +365,37 @@ export default function NexusScale(){
       setStage("enhance");
       addLog("Applying enhancement pipeline...","sys");
       await delay(150); if(!pipelineActive.current) return null;
-      let resultUrl=null,rw=fd.w,rh=fd.h;
+      let resultUrl=null,rw=fd.w,rh=fd.h,rlabel=null,rpill=null;
 
       if(fd.canvas&&fd.w){
-        const dw=fd.w*sc, dh=fd.h*sc;
-        if(dw*dh>16777216) throw new Error(`${dw}×${dh} exceeds 16MP browser canvas limit. Reduce scale.`);
-        addLog(`Upscaling ${fd.w}×${fd.h} → ${dw}×${dh} (${sc}x · ${al})`,"info");
+        // Resolution-target mode (4K/8K) computes dims via the engine; multiplier mode keeps fd.w*sc.
+        const dims = tg ? targetDims(fd.w,fd.h,tg) : { dw:fd.w*sc, dh:fd.h*sc };
+        const dw=dims.dw, dh=dims.dh, outPx=dw*dh;
+        if(outPx>MAX_PIXELS) throw new Error(`${dw}×${dh} (${Math.round(outPx/1e6)}MP) exceeds the ${Math.round(MAX_PIXELS/1e6)}MP ceiling.`);
+        const big = outPx>16777216; // beyond the pure-JS safe zone → route through the GPU stepped sampler
+        rlabel = tg || `${sc}x`;                         // ASCII token for filenames ("8K" / "2x")
+        rpill  = `${tg||sc+"×"} · ${big?"HQ":al.toUpperCase()}`; // display string for the meta pill
+        addLog(`Upscaling ${fd.w}×${fd.h} → ${dw}×${dh} (${tg||sc+"×"} · ${big?"HQ sampler":al})`,"info");
+        if(big&&!tg) addLog("Above 16MP — using GPU sampler; interpolation choice ignored","info");
         const srcPx = isProgressive ? progPx : fd.canvas.getContext("2d").getImageData(0,0,fd.w,fd.h).data;
         await delay(30);
-        let px=al==="nearest"?nearestNeighbor(srcPx,fd.w,fd.h,dw,dh):
-                al==="bilinear"?bilinear(srcPx,fd.w,fd.h,dw,dh):
-                bicubic(srcPx,fd.w,fd.h,dw,dh);
+        let px = big
+          ? resizePixels(srcPx,fd.w,fd.h,dw,dh)
+          : (al==="nearest"?nearestNeighbor(srcPx,fd.w,fd.h,dw,dh):
+             al==="bilinear"?bilinear(srcPx,fd.w,fd.h,dw,dh):
+             bicubic(srcPx,fd.w,fd.h,dw,dh));
         const finalDn = isProgressive ? dn * 0.7 : dn;
         const finalCt = (isProgressive && ctv !== 1.0) ? Math.sqrt(ctv) : ctv;
-        if(finalDn>0){ addLog(`Denoise (${finalDn.toFixed(2)}${isProgressive?" — remaining":""})`,"info"); await delay(20); px=applyDenoise(px,dw,dh,finalDn); }
-        if(finalCt!==1.0){ addLog(`Contrast (×${finalCt.toFixed(2)}${isProgressive?" — remaining":""})`,"info"); px=enhanceContrast(px,dw,dh,finalCt); }
-        if(sh>0){ addLog(`Sharpen (${sh.toFixed(1)})`,"info"); await delay(20); px=applyUnsharpMask(px,dw,dh,sh); }
+        if(big){
+          // No-freeze guard: above 16MP, skip the heavy JS denoise/sharpen convolutions
+          // (the GPU sampler already yields clean edges). Cheap single-pass contrast stays.
+          addLog("Skipping JS denoise/sharpen above 16MP (keeps UI responsive)","info");
+          if(finalCt!==1.0){ addLog(`Contrast (×${finalCt.toFixed(2)})`,"info"); px=enhanceContrast(px,dw,dh,finalCt); }
+        } else {
+          if(finalDn>0){ addLog(`Denoise (${finalDn.toFixed(2)}${isProgressive?" — remaining":""})`,"info"); await delay(20); px=applyDenoise(px,dw,dh,finalDn); }
+          if(finalCt!==1.0){ addLog(`Contrast (×${finalCt.toFixed(2)}${isProgressive?" — remaining":""})`,"info"); px=enhanceContrast(px,dw,dh,finalCt); }
+          if(sh>0){ addLog(`Sharpen (${sh.toFixed(1)})`,"info"); await delay(20); px=applyUnsharpMask(px,dw,dh,sh); }
+        }
         const out=document.createElement("canvas"); out.width=dw; out.height=dh;
         out.getContext("2d").putImageData(new ImageData(px,dw,dh),0,0);
         resultUrl=out.toDataURL("image/png");
@@ -394,7 +415,7 @@ export default function NexusScale(){
       setStage("report");
       addLog("Compiling intelligence report...","sys");
       await delay(200);
-      const finalResult={url:resultUrl,w:rw,h:rh};
+      const finalResult={url:resultUrl,w:rw,h:rh,label:rlabel,pill:rpill};
       setResult(finalResult);
       setAiReport({analysis,webReport,scanMeta});
       addLog("════════════════════════════","sys");
@@ -408,7 +429,7 @@ export default function NexusScale(){
       setErr(e.message); setStage(null);
       pipelineActive.current=false; return null;
     }
-  },[fileData,scale,algo,sharpen,denoise,contrast,addLog,stage,progressiveEnhance]);
+  },[fileData,scale,target,algo,sharpen,denoise,contrast,addLog,stage,progressiveEnhance]);
 
   const runPipeline=useCallback(()=>runPipelineWith(),[runPipelineWith]);
 
@@ -417,9 +438,11 @@ export default function NexusScale(){
     const r=resultOverride||result;
     if(!r?.url) return false;
     try{
-      const sc=scaleHint??scale;
+      // Benchmark passes a numeric scaleHint → "<n>x"; normal UI download uses the
+      // result's label ("8K"/"2x") so resolution-target outputs are named correctly.
+      const tag=scaleHint!=null?`${scaleHint}x`:(r.label||`${scale}x`);
       const nm=nameHint||(fileData?.name)||"output.png";
-      const filename=`nexusscale_${sc}x_${nm}`;
+      const filename=`nexusscale_${tag}_${nm}`;
       let blobUrl;
       if(r.url.startsWith("blob:")){ blobUrl=r.url; }
       else if(r.url.startsWith("data:")){
@@ -598,7 +621,11 @@ export default function NexusScale(){
             <div style={S.paramGroup}>
               <div style={S.paramHead}>SCALE FACTOR</div>
               <div style={S.btnRow}>
-                {[2,3,4].map(s=><button key={s} style={{...S.optBtn,...(scale===s?S.optBtnOn:{})}} onClick={()=>setScale(s)}>{s}×</button>)}
+                {[2,3,4].map(s=><button key={s} style={{...S.optBtn,...((!target&&scale===s)?S.optBtnOn:{})}} onClick={()=>{setTarget(null);setScale(s);}}>{s}×</button>)}
+              </div>
+              <div style={S.paramHead}>RESOLUTION TARGET</div>
+              <div style={S.btnRow}>
+                {["4K","8K"].map(t=><button key={t} style={{...S.optBtn,...(target===t?S.optBtnOn:{})}} onClick={()=>setTarget(target===t?null:t)}>{t}</button>)}
               </div>
             </div>
             <div style={S.paramGroup}>
@@ -711,7 +738,7 @@ export default function NexusScale(){
                     <span style={S.metaPill}>{fileData.w}×{fileData.h} ORIGINAL</span>
                     <span style={{color:"#333"}}>→</span>
                     <span style={{...S.metaPill,...S.metaPillGreen}}>{result.w}×{result.h} ENHANCED</span>
-                    <span style={S.metaPill}>{scale}× · {algo.toUpperCase()}</span>
+                    <span style={S.metaPill}>{result.pill||`${scale}× · ${algo.toUpperCase()}`}</span>
                   </div>
                 </div>
               ):result&&!fileData?.isImg?(

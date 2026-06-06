@@ -6,3 +6,4 @@ export { applyUnsharpMask } from "./unsharpMask.js";
 export { applyDenoise } from "./denoise.js";
 export { enhanceContrast } from "./enhanceContrast.js";
 export { computeSharpness, computeContrast, qualityScore } from "./qualityMetrics.js";
+export { canvasResize, resizePixels, targetDims, TARGETS, MAX_PIXELS } from "./canvasResize.js";

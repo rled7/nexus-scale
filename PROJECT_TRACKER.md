@@ -64,17 +64,27 @@ PDF), pick a scale, run a multi-stage pipeline (ingest → scan → analysis →
   fetch; wire `enhancePDF()` into the PDF branch of the enhance stage.
 
 ## 6. Where it's headed (roadmap)
-- [ ] **8K / 4K upscaling** — wire `canvasResize` target options into the UI
-      (2×/3×/4×/4K/8K), route >16MP through the GPU sampler, raise the cap.
-- [ ] **No-freeze pipeline** — move the enhance stage into a Web Worker w/
-      `OffscreenCanvas` so big jobs never block the UI (pattern already in
-      `pdfWorker.js`). Auto-skip JS denoise/sharpen above ~16MP.
-- [ ] **Real PDF upscaling** — integrate the salvaged worker (§5).
+- [x] **8K / 4K upscaling** (2026-06-05) — added a RESOLUTION TARGET row (4K/8K)
+      beside the 2×/3×/4× multipliers; target mode computes dims via
+      `targetDims`, routes >16MP through the GPU stepped sampler (`resizePixels`),
+      raised the cap from 16MP to `MAX_PIXELS` (67MP), auto-skips JS denoise/sharpen
+      above 16MP (no-freeze guard), benchmark-safe `target` precedence. Tests:
+      `test/targetDims.test.mjs` 10/10 + regression 14/14, build green. ⚠️ Needs a
+      MANUAL browser check (8K actually emerges, UI stays responsive).
+- [ ] **No-freeze pipeline** — move the IMAGE enhance stage into a Web Worker w/
+      `OffscreenCanvas` so big jobs never block the main thread (the 16MP skip is a
+      mitigation, NOT the full Worker move). Pattern already in `pdfWorker.js`.
+- [ ] **Real PDF upscaling** — wire the (intact) worker. See `PDF-UPSCALER-TASK.md`
+      for the full spec. Key bugs found 2026-06-05: `enhancePDF` passes the `fd`
+      OBJECT to `new Blob([fd])` (yields "[object Object]", not bytes) → must decode
+      `fd.b64`→Uint8Array; worker created without `{type:'module'}`; multi-page
+      output vs single-result UX is an OPEN DECISION.
 - [x] **Removed the "AI (API KEY)" browser-fetch mode** (2026-06-04) — analysis
       is now 100% local; eliminated the client-side API-key exposure risk.
 - [x] **Bundled pdf.js locally** (2026-06-04) — added `pdfjs-dist`, dropped the
       unpkg CDN fetch in `pdfWorker.js` (supply-chain risk removed).
-- [ ] **Ship to GitHub** — `.gitignore` node_modules/dist, `git rm -r --cached
-      node_modules`, add remote, reconcile + push to `rled7/nexus-scale`.
+- [x] **Ship to GitHub** (2026-06-04) — `.gitignore` node_modules/dist, `git rm
+      -r --cached node_modules`, added remote, reconciled + pushed to
+      `rled7/nexus-scale` (clean single-history, up to commit `eb96358`).
 - [ ] (stretch) **WebAssembly hot path** — port the bicubic/convolution kernels
       to C/Rust → Wasm for a big speedup on large images (see notes).
