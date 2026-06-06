@@ -1,6 +1,9 @@
 // ─── Global CSS ───────────────────────────────────────────────────────────────
 export const CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap');
+/* Fully offline: no webfont CDN. The hardened CSP already blocks
+   fonts.googleapis.com, so this app runs on local font stacks
+   ('Share Tech Mono'→monospace, 'Orbitron'→sans-serif fallbacks). To restore
+   the exact display fonts, bundle the .woff2 files locally + add @font-face. */
 *{box-sizing:border-box;margin:0;padding:0;}
 ::-webkit-scrollbar{width:3px;}
 ::-webkit-scrollbar-track{background:#0a0a0a;}
