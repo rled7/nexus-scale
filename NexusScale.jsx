@@ -13,6 +13,7 @@ import {
   resizePixels, targetDims, MAX_PIXELS,
 } from "./imageProcessing/index.js";
 import { qualityScore } from "./imageProcessing/qualityMetrics.js";
+import { enhancePDF } from "./pdfEnhancer.js";
 import { BrowserLogger } from "./BrowserLogger.js";
 import { dataURLtoBlob } from "./fileUtils.js";
 import { CSS, S } from "./styles.js";
@@ -365,7 +366,7 @@ export default function NexusScale(){
       setStage("enhance");
       addLog("Applying enhancement pipeline...","sys");
       await delay(150); if(!pipelineActive.current) return null;
-      let resultUrl=null,rw=fd.w,rh=fd.h,rlabel=null,rpill=null;
+      let resultUrl=null,rw=fd.w,rh=fd.h,rlabel=null,rpill=null,rIsPdfImg=false;
 
       if(fd.canvas&&fd.w){
         // Resolution-target mode (4K/8K) computes dims via the engine; multiplier mode keeps fd.w*sc.
@@ -404,9 +405,25 @@ export default function NexusScale(){
         if (isProgressive) {
           setStageSnapshots(prev => [...prev, { stage: "enhance", label: "Enhanced", thumb: makeThumbnail(px, dw, dh) }]);
         }
+      } else if(fd.isPdf && fd.b64){
+        // Real PDF upscaling (option A / v1): render every page with pdf.js at the
+        // chosen scale off the main thread, then surface PAGE 1 as the result image.
+        // Multi-page download (ZIP/gallery) is the planned follow-up — see PDF-UPSCALER-TASK.md.
+        addLog(`Rendering PDF with pdf.js at ${sc}×...`,"sys");
+        const bytes = Uint8Array.from(atob(fd.b64), c=>c.charCodeAt(0));
+        let pdfRes;
+        try { pdfRes = await enhancePDF(bytes, sc); }
+        catch(e){ throw new Error(`PDF upscale failed: ${e.message}`); }
+        if(!pdfRes?.pages?.length) throw new Error("PDF produced no pages.");
+        resultUrl = pdfRes.pages[0];
+        pdfRes.pages.slice(1).forEach(u=>URL.revokeObjectURL(u)); // option A keeps page 1 only — free the rest
+        rlabel = `${sc}x`;
+        rpill  = `PDF · ${sc}× · HQ`;
+        rIsPdfImg = true;
+        addLog(`PDF upscaled ${sc}× — ${pdfRes.originalPages} page(s); showing page 1`,"ok");
       } else {
         addLog("Packaging document for download...","info");
-        resultUrl=fd.url;  // PDF blob URL — owned by pipeline
+        resultUrl=fd.url;  // non-PDF doc / no data — repackage as-is
         addLog("Document packaged.","ok");
       }
       comp("enhance");
@@ -415,7 +432,7 @@ export default function NexusScale(){
       setStage("report");
       addLog("Compiling intelligence report...","sys");
       await delay(200);
-      const finalResult={url:resultUrl,w:rw,h:rh,label:rlabel,pill:rpill};
+      const finalResult={url:resultUrl,w:rw,h:rh,label:rlabel,pill:rpill,isPdfImg:rIsPdfImg};
       setResult(finalResult);
       setAiReport({analysis,webReport,scanMeta});
       addLog("════════════════════════════","sys");
@@ -441,7 +458,9 @@ export default function NexusScale(){
       // Benchmark passes a numeric scaleHint → "<n>x"; normal UI download uses the
       // result's label ("8K"/"2x") so resolution-target outputs are named correctly.
       const tag=scaleHint!=null?`${scaleHint}x`:(r.label||`${scale}x`);
-      const nm=nameHint||(fileData?.name)||"output.png";
+      // An upscaled PDF page is a PNG, not a PDF — fix the extension so it opens right.
+      let nm=nameHint||(fileData?.name)||"output.png";
+      if(r.isPdfImg) nm=nm.replace(/\.pdf$/i,"")+"_page1.png";
       const filename=`nexusscale_${tag}_${nm}`;
       let blobUrl;
       if(r.url.startsWith("blob:")){ blobUrl=r.url; }
@@ -740,6 +759,15 @@ export default function NexusScale(){
                     <span style={{...S.metaPill,...S.metaPillGreen}}>{result.w}×{result.h} ENHANCED</span>
                     <span style={S.metaPill}>{result.pill||`${scale}× · ${algo.toUpperCase()}`}</span>
                   </div>
+                </div>
+              ):result&&result.isPdfImg?(
+                <div style={S.docOut}>
+                  <img src={result.url} style={{maxWidth:"100%",borderRadius:8,boxShadow:"0 0 24px rgba(0,255,157,0.15)"}} alt="upscaled PDF page 1"/>
+                  <div style={{...S.cmpMeta,justifyContent:"center",marginTop:12}}>
+                    <span style={{...S.metaPill,...S.metaPillGreen}}>{result.pill} · PAGE 1</span>
+                  </div>
+                  <div style={S.docOutSub}>Page 1 shown — multi-page export coming. View Intel Report for findings.</div>
+                  <button style={S.dlBtn2} onClick={()=>download()}>⬇ DOWNLOAD PAGE 1 (PNG)</button>
                 </div>
               ):result&&!fileData?.isImg?(
                 <div style={S.docOut}>

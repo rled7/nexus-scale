@@ -8,7 +8,8 @@
 
 export function enhancePDF(fd, scale = 2) {
   return new Promise((resolve, reject) => {
-    const worker = new Worker(new URL('./pdfWorker.js', import.meta.url));
+    // { type: 'module' } is required — pdfWorker.js uses dynamic import().
+    const worker = new Worker(new URL('./pdfWorker.js', import.meta.url), { type: 'module' });
 
     worker.onmessage = (e) => {
       const { pages, originalPages, error } = e.data;
