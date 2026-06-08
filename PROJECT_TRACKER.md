@@ -97,19 +97,24 @@ PDF), pick a scale, run a multi-stage pipeline (ingest → scan → analysis →
 - [x] **Ship to GitHub** (2026-06-04) — `.gitignore` node_modules/dist, `git rm
       -r --cached node_modules`, added remote, reconciled + pushed to
       `rled7/nexus-scale` (clean single-history, up to commit `eb96358`).
-- [ ] (optional polish) **Restore display fonts offline** — bundle Share Tech Mono
-      + Orbitron `.woff2` locally + `@font-face` to recover the exact look (currently
-      on system fallbacks). BLOCKED on obtaining the font binaries (no CDN at runtime).
+- [x] **Display fonts bundled offline** (2026-06-08, commit `4008f62`) — Share Tech
+      Mono + Orbitron (400/700/900) via `@fontsource` packages imported in `main.jsx`;
+      Vite emits the woff2 as local assets. Exact look restored, zero runtime network.
 - [ ] (stretch) **WebAssembly hot path** — port the bicubic/convolution kernels
       to C/Rust → Wasm for a big speedup on large images (see notes).
 
 ## 7. Status (2026-06-08): feature-complete pending browser verification
-All requested + roadmap features are wired, built green, and unit-tested. The ONLY
-gate to "done" is a manual browser pass (image enhancement only truly exercises in a
-browser). **Browser-check list:**
-1. Load a large image → pick **8K** → confirm it emerges at the right size + the UI
-   stays responsive (no-freeze worker) → download names it `nexusscale_8K_*`.
-2. Load a multi-page PDF → run → confirm pages render upscaled, the **pager** works,
-   **THIS PAGE (PNG)** + **ALL PAGES (ZIP)** download (open the ZIP).
-3. Confirm offline: DevTools Network shows zero external requests.
-Remaining after that = optional polish (fonts) + the WASM stretch.
+All requested + roadmap features (8K/4K, PDF upscaler + multi-page ZIP, fully-offline,
+no-freeze worker, local fonts) are wired, built green, and unit-tested. The ONLY gate
+to "done" is a manual browser pass — image/PDF rendering only truly exercises in a
+browser. **Browser-check list (ordered by risk):**
+1. **PDF render (highest risk — salvaged pdf.js v6 worker):** load a multi-page PDF →
+   run → confirm pages render visibly upscaled. If this works, the PDF feature is live.
+2. **Multi-page controls:** the **pager** (◀ n/m ▶) cycles pages; **THIS PAGE (PNG)**
+   and **ALL PAGES (ZIP)** both download — open the ZIP to confirm it's valid.
+3. **8K image:** big image → **8K** → emerges at size, file named `nexusscale_8K_*`.
+4. **Offline:** DevTools Network shows zero external requests.
+
+Note: "no-freeze" moved the convolutions off-thread, but `getImageData`/`toDataURL`
+on up-to-16MP still run on main — a brief hitch while PNG-encoding a big result is the
+ENCODE, not a worker failure. Remaining after the pass = WASM stretch only.
