@@ -17,6 +17,12 @@ import { enhancePDF } from "./pdfEnhancer.js";
 import { zipStored } from "./pdfZip.js";
 import { enhanceImage } from "./imageEnhancer.js";
 import { runEnhancePixels } from "./imageProcessing/enhancePixels.js";
+import { LRUCache, keyOf } from "./cache/index.js";
+
+// Module-level result cache: re-running the same image with the same settings
+// returns instantly instead of recomputing resize + filters + PNG encode. Budgeted
+// by bytes (data-URL string length) so it can't grow unbounded. Survives re-renders.
+const enhanceCache = new LRUCache({ maxEntries: 16, maxBytes: 256 * 1024 * 1024, sizeOf: (r) => (r?.url?.length || 0) * 2 });
 import { BrowserLogger } from "./BrowserLogger.js";
 import { dataURLtoBlob } from "./fileUtils.js";
 import { CSS, S } from "./styles.js";
@@ -387,29 +393,39 @@ export default function NexusScale(){
         await delay(30);
         const finalDn = isProgressive ? dn * 0.7 : dn;
         const finalCt = (isProgressive && ctv !== 1.0) ? Math.sqrt(ctv) : ctv;
-        let px;
-        if(big){
-          // >16MP: GPU stepped sampler on the main thread (fast, no JS convolution
-          // loops). Heavy JS denoise/sharpen skipped; cheap single-pass contrast stays.
-          px = resizePixels(srcPx,fd.w,fd.h,dw,dh);
-          addLog("Skipping JS denoise/sharpen above 16MP (keeps UI responsive)","info");
-          if(finalCt!==1.0){ addLog(`Contrast (×${finalCt.toFixed(2)})`,"info"); px=enhanceContrast(px,dw,dh,finalCt); }
+        // Cache key = file fingerprint (name|size|dims) + every param that changes
+        // the output. A hit returns the finished PNG and skips resize+filters+encode.
+        const cacheKey = keyOf({ fp:`${fd.name}|${fd.size}|${fd.w}x${fd.h}`, dw, dh, algo:al, dn:finalDn, ct:finalCt, sh, big, prog:isProgressive });
+        const hit = enhanceCache.get(cacheKey);
+        if(hit){
+          resultUrl=hit.url; rw=hit.w; rh=hit.h;
+          addLog(`Cache hit — reused enhanced ${hit.w}×${hit.h}px (skipped recompute)`,"ok");
         } else {
-          // ≤16MP: run resize + filters in a Web Worker so the main thread never
-          // freezes; fall back to the identical inline core if Worker is unavailable.
-          const params={srcPx,sw:fd.w,sh:fd.h,dw,dh,algo:al,denoise:finalDn,contrast:finalCt,sharpen:sh};
-          addLog(`Enhancing off-thread: ${al} + denoise ${finalDn.toFixed(2)} · contrast ×${finalCt.toFixed(2)} · sharpen ${sh.toFixed(1)}`,"info");
-          await delay(20);
-          try { px = await enhanceImage(params); addLog("Enhanced off the main thread (worker)","ok"); }
-          catch(werr){ addLog(`Worker unavailable (${werr.message}) — inline fallback`,"warn"); px = runEnhancePixels(params); }
-        }
-        const out=document.createElement("canvas"); out.width=dw; out.height=dh;
-        out.getContext("2d").putImageData(new ImageData(px,dw,dh),0,0);
-        resultUrl=out.toDataURL("image/png");
-        rw=dw; rh=dh;
-        addLog(`Enhancement complete → ${dw}×${dh}px`,"ok");
-        if (isProgressive) {
-          setStageSnapshots(prev => [...prev, { stage: "enhance", label: "Enhanced", thumb: makeThumbnail(px, dw, dh) }]);
+          let px;
+          if(big){
+            // >16MP: GPU stepped sampler on the main thread (fast, no JS convolution
+            // loops). Heavy JS denoise/sharpen skipped; cheap single-pass contrast stays.
+            px = resizePixels(srcPx,fd.w,fd.h,dw,dh);
+            addLog("Skipping JS denoise/sharpen above 16MP (keeps UI responsive)","info");
+            if(finalCt!==1.0){ addLog(`Contrast (×${finalCt.toFixed(2)})`,"info"); px=enhanceContrast(px,dw,dh,finalCt); }
+          } else {
+            // ≤16MP: run resize + filters in a Web Worker so the main thread never
+            // freezes; fall back to the identical inline core if Worker is unavailable.
+            const params={srcPx,sw:fd.w,sh:fd.h,dw,dh,algo:al,denoise:finalDn,contrast:finalCt,sharpen:sh};
+            addLog(`Enhancing off-thread: ${al} + denoise ${finalDn.toFixed(2)} · contrast ×${finalCt.toFixed(2)} · sharpen ${sh.toFixed(1)}`,"info");
+            await delay(20);
+            try { px = await enhanceImage(params); addLog("Enhanced off the main thread (worker)","ok"); }
+            catch(werr){ addLog(`Worker unavailable (${werr.message}) — inline fallback`,"warn"); px = runEnhancePixels(params); }
+          }
+          const out=document.createElement("canvas"); out.width=dw; out.height=dh;
+          out.getContext("2d").putImageData(new ImageData(px,dw,dh),0,0);
+          resultUrl=out.toDataURL("image/png");
+          rw=dw; rh=dh;
+          enhanceCache.set(cacheKey, { url:resultUrl, w:rw, h:rh });
+          addLog(`Enhancement complete → ${dw}×${dh}px`,"ok");
+          if (isProgressive) {
+            setStageSnapshots(prev => [...prev, { stage: "enhance", label: "Enhanced", thumb: makeThumbnail(px, dw, dh) }]);
+          }
         }
       } else if(fd.isPdf && fd.b64){
         // Real PDF upscaling (option A / v1): render every page with pdf.js at the
