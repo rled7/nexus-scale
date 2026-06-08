@@ -14,6 +14,7 @@ import {
 } from "./imageProcessing/index.js";
 import { qualityScore } from "./imageProcessing/qualityMetrics.js";
 import { enhancePDF } from "./pdfEnhancer.js";
+import { zipStored } from "./pdfZip.js";
 import { BrowserLogger } from "./BrowserLogger.js";
 import { dataURLtoBlob } from "./fileUtils.js";
 import { CSS, S } from "./styles.js";
@@ -40,6 +41,7 @@ export default function NexusScale(){
   const [fileData, setFileData]   = useState(null);
   const [scale,    setScale]      = useState(2);
   const [target,   setTarget]     = useState(null); // null = multiplier mode; "4K"/"8K" = resolution target
+  const [pdfPage,  setPdfPage]    = useState(0);    // which upscaled PDF page the pager is showing
   const [algo,     setAlgo]       = useState("bicubic");
   const [sharpen,  setSharpen]    = useState(0.4);
   const [denoise,  setDenoise]    = useState(0.2);
@@ -191,7 +193,8 @@ export default function NexusScale(){
     if(!fdOverride&&stage&&stage!=="done") return null;
 
     pipelineActive.current=true;
-    setDone([]); setErr(null); setResult(null); setStage(null); setStageSnapshots([]);
+    setDone([]); setErr(null); setStage(null); setStageSnapshots([]); setPdfPage(0);
+    setResult(prev=>{ prev?.pages?.forEach(u=>URL.revokeObjectURL(u)); return null; }); // free prior PDF page URLs
     if(!fdOverride){ setAiReport(null); setLog([]); }
     const comp=(s)=>{ if(pipelineActive.current) setDone(p=>[...p,s]); };
 
@@ -366,7 +369,7 @@ export default function NexusScale(){
       setStage("enhance");
       addLog("Applying enhancement pipeline...","sys");
       await delay(150); if(!pipelineActive.current) return null;
-      let resultUrl=null,rw=fd.w,rh=fd.h,rlabel=null,rpill=null,rIsPdfImg=false;
+      let resultUrl=null,rw=fd.w,rh=fd.h,rlabel=null,rpill=null,rIsPdfImg=false,rPages=null;
 
       if(fd.canvas&&fd.w){
         // Resolution-target mode (4K/8K) computes dims via the engine; multiplier mode keeps fd.w*sc.
@@ -416,11 +419,11 @@ export default function NexusScale(){
         catch(e){ throw new Error(`PDF upscale failed: ${e.message}`); }
         if(!pdfRes?.pages?.length) throw new Error("PDF produced no pages.");
         resultUrl = pdfRes.pages[0];
-        pdfRes.pages.slice(1).forEach(u=>URL.revokeObjectURL(u)); // option A keeps page 1 only — free the rest
+        rPages = pdfRes.pages;          // keep ALL pages for the pager + ZIP export
         rlabel = `${sc}x`;
         rpill  = `PDF · ${sc}× · HQ`;
         rIsPdfImg = true;
-        addLog(`PDF upscaled ${sc}× — ${pdfRes.originalPages} page(s); showing page 1`,"ok");
+        addLog(`PDF upscaled ${sc}× — ${pdfRes.originalPages} page(s)`,"ok");
       } else {
         addLog("Packaging document for download...","info");
         resultUrl=fd.url;  // non-PDF doc / no data — repackage as-is
@@ -432,7 +435,7 @@ export default function NexusScale(){
       setStage("report");
       addLog("Compiling intelligence report...","sys");
       await delay(200);
-      const finalResult={url:resultUrl,w:rw,h:rh,label:rlabel,pill:rpill,isPdfImg:rIsPdfImg};
+      const finalResult={url:resultUrl,w:rw,h:rh,label:rlabel,pill:rpill,isPdfImg:rIsPdfImg,pages:rPages};
       setResult(finalResult);
       setAiReport({analysis,webReport,scanMeta});
       addLog("════════════════════════════","sys");
@@ -479,6 +482,28 @@ export default function NexusScale(){
       addLog(`Download: ${filename}`,"ok");
       return true;
     }catch(e){ addLog(`Download error: ${e.message}`,"error"); return false; }
+  },[result,scale,fileData,addLog]);
+
+  // ── Download ALL upscaled PDF pages as a single ZIP (dependency-free writer) ──
+  const downloadAllPdf=useCallback(async()=>{
+    if(!result?.pages?.length) return false;
+    try{
+      const base=(fileData?.name||"document.pdf").replace(/\.pdf$/i,"");
+      const tag=result.label||`${scale}x`;
+      const files=[];
+      for(let i=0;i<result.pages.length;i++){
+        const buf=new Uint8Array(await (await fetch(result.pages[i])).arrayBuffer());
+        files.push({name:`nexusscale_${tag}_${base}_page${i+1}.png`,bytes:buf});
+      }
+      const blob=new Blob([zipStored(files)],{type:"application/zip"});
+      const blobUrl=URL.createObjectURL(blob);
+      const a=document.createElement("a");
+      a.href=blobUrl; a.download=`nexusscale_${tag}_${base}_pages.zip`; a.style.display="none";
+      document.body.appendChild(a); a.click();
+      setTimeout(()=>{document.body.removeChild(a);URL.revokeObjectURL(blobUrl);},2000);
+      addLog(`Download: ${files.length}-page ZIP`,"ok");
+      return true;
+    }catch(e){ addLog(`ZIP download error: ${e.message}`,"error"); return false; }
   },[result,scale,fileData,addLog]);
 
   // ── verifyDownload — blob conversion test, no file-save popup ───────────────
@@ -760,16 +785,26 @@ export default function NexusScale(){
                     <span style={S.metaPill}>{result.pill||`${scale}× · ${algo.toUpperCase()}`}</span>
                   </div>
                 </div>
-              ):result&&result.isPdfImg?(
+              ):result&&result.isPdfImg?((()=>{
+                const pages=(result.pages&&result.pages.length)?result.pages:[result.url];
+                const cur=Math.min(pdfPage,pages.length-1);
+                const base=(fileData?.name||"document.pdf").replace(/\.pdf$/i,"");
+                return (
                 <div style={S.docOut}>
-                  <img src={result.url} style={{maxWidth:"100%",borderRadius:8,boxShadow:"0 0 24px rgba(0,255,157,0.15)"}} alt="upscaled PDF page 1"/>
-                  <div style={{...S.cmpMeta,justifyContent:"center",marginTop:12}}>
-                    <span style={{...S.metaPill,...S.metaPillGreen}}>{result.pill} · PAGE 1</span>
+                  <img src={pages[cur]} style={{maxWidth:"100%",borderRadius:8,boxShadow:"0 0 24px rgba(0,255,157,0.15)"}} alt={`upscaled PDF page ${cur+1}`}/>
+                  <div style={{...S.cmpMeta,justifyContent:"center",alignItems:"center",marginTop:12,gap:8}}>
+                    <span style={{...S.metaPill,...S.metaPillGreen}}>{result.pill}</span>
+                    {pages.length>1&&<button style={S.optBtn} onClick={()=>setPdfPage(Math.max(0,cur-1))} disabled={cur===0}>◀</button>}
+                    <span style={S.metaPill}>PAGE {cur+1} / {pages.length}</span>
+                    {pages.length>1&&<button style={S.optBtn} onClick={()=>setPdfPage(Math.min(pages.length-1,cur+1))} disabled={cur===pages.length-1}>▶</button>}
                   </div>
-                  <div style={S.docOutSub}>Page 1 shown — multi-page export coming. View Intel Report for findings.</div>
-                  <button style={S.dlBtn2} onClick={()=>download()}>⬇ DOWNLOAD PAGE 1 (PNG)</button>
-                </div>
-              ):result&&!fileData?.isImg?(
+                  <div style={S.docOutSub}>{pages.length>1?`${pages.length} pages upscaled — page through above, or export all as a ZIP.`:"View Intel Report for findings."}</div>
+                  <div style={{display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap"}}>
+                    <button style={S.dlBtn2} onClick={()=>download({url:pages[cur]},null,`${base}_page${cur+1}.png`)}>⬇ THIS PAGE (PNG)</button>
+                    {pages.length>1&&<button style={S.dlBtn2} onClick={()=>downloadAllPdf()}>⬇ ALL PAGES (ZIP)</button>}
+                  </div>
+                </div>);
+              })()):result&&!fileData?.isImg?(
                 <div style={S.docOut}>
                   <div style={S.docOutIco}>📄</div>
                   <div style={S.docOutTitle}>DOCUMENT ANALYZED</div>
