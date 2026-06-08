@@ -17,7 +17,9 @@ export function enhancePDF(fd, scale = 2) {
         reject(new Error(error));
       } else {
         const pageUrls = pages.map(blob => URL.createObjectURL(blob));
-        resolve({ pages: pageUrls, originalPages });
+        // Return the raw blobs too: the ZIP export reads blob.arrayBuffer()
+        // directly, avoiding a fetch(blob:) that CSP connect-src 'self' would block.
+        resolve({ pages: pageUrls, blobs: pages, originalPages });
       }
       worker.terminate();
     };

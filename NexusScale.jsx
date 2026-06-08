@@ -371,7 +371,7 @@ export default function NexusScale(){
       setStage("enhance");
       addLog("Applying enhancement pipeline...","sys");
       await delay(150); if(!pipelineActive.current) return null;
-      let resultUrl=null,rw=fd.w,rh=fd.h,rlabel=null,rpill=null,rIsPdfImg=false,rPages=null;
+      let resultUrl=null,rw=fd.w,rh=fd.h,rlabel=null,rpill=null,rIsPdfImg=false,rPages=null,rBlobs=null;
 
       if(fd.canvas&&fd.w){
         // Resolution-target mode (4K/8K) computes dims via the engine; multiplier mode keeps fd.w*sc.
@@ -422,7 +422,8 @@ export default function NexusScale(){
         catch(e){ throw new Error(`PDF upscale failed: ${e.message}`); }
         if(!pdfRes?.pages?.length) throw new Error("PDF produced no pages.");
         resultUrl = pdfRes.pages[0];
-        rPages = pdfRes.pages;          // keep ALL pages for the pager + ZIP export
+        rPages = pdfRes.pages;          // object URLs for the pager preview
+        rBlobs = pdfRes.blobs;          // raw blobs for the CSP-safe ZIP export
         rlabel = `${sc}x`;
         rpill  = `PDF · ${sc}× · HQ`;
         rIsPdfImg = true;
@@ -438,7 +439,7 @@ export default function NexusScale(){
       setStage("report");
       addLog("Compiling intelligence report...","sys");
       await delay(200);
-      const finalResult={url:resultUrl,w:rw,h:rh,label:rlabel,pill:rpill,isPdfImg:rIsPdfImg,pages:rPages};
+      const finalResult={url:resultUrl,w:rw,h:rh,label:rlabel,pill:rpill,isPdfImg:rIsPdfImg,pages:rPages,pageBlobs:rBlobs};
       setResult(finalResult);
       setAiReport({analysis,webReport,scanMeta});
       addLog("════════════════════════════","sys");
@@ -493,9 +494,12 @@ export default function NexusScale(){
     try{
       const base=(fileData?.name||"document.pdf").replace(/\.pdf$/i,"");
       const tag=result.label||`${scale}x`;
+      // Read bytes straight off the blobs (no fetch → no CSP connect-src issue).
+      const sources=result.pageBlobs||result.pages;
       const files=[];
-      for(let i=0;i<result.pages.length;i++){
-        const buf=new Uint8Array(await (await fetch(result.pages[i])).arrayBuffer());
+      for(let i=0;i<sources.length;i++){
+        const src=sources[i];
+        const buf=new Uint8Array(src instanceof Blob ? await src.arrayBuffer() : await (await fetch(src)).arrayBuffer());
         files.push({name:`nexusscale_${tag}_${base}_page${i+1}.png`,bytes:buf});
       }
       const blob=new Blob([zipStored(files)],{type:"application/zip"});
