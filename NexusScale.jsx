@@ -15,6 +15,8 @@ import {
 import { qualityScore } from "./imageProcessing/qualityMetrics.js";
 import { enhancePDF } from "./pdfEnhancer.js";
 import { zipStored } from "./pdfZip.js";
+import { enhanceImage } from "./imageEnhancer.js";
+import { runEnhancePixels } from "./imageProcessing/enhancePixels.js";
 import { BrowserLogger } from "./BrowserLogger.js";
 import { dataURLtoBlob } from "./fileUtils.js";
 import { CSS, S } from "./styles.js";
@@ -383,22 +385,23 @@ export default function NexusScale(){
         if(big&&!tg) addLog("Above 16MP — using GPU sampler; interpolation choice ignored","info");
         const srcPx = isProgressive ? progPx : fd.canvas.getContext("2d").getImageData(0,0,fd.w,fd.h).data;
         await delay(30);
-        let px = big
-          ? resizePixels(srcPx,fd.w,fd.h,dw,dh)
-          : (al==="nearest"?nearestNeighbor(srcPx,fd.w,fd.h,dw,dh):
-             al==="bilinear"?bilinear(srcPx,fd.w,fd.h,dw,dh):
-             bicubic(srcPx,fd.w,fd.h,dw,dh));
         const finalDn = isProgressive ? dn * 0.7 : dn;
         const finalCt = (isProgressive && ctv !== 1.0) ? Math.sqrt(ctv) : ctv;
+        let px;
         if(big){
-          // No-freeze guard: above 16MP, skip the heavy JS denoise/sharpen convolutions
-          // (the GPU sampler already yields clean edges). Cheap single-pass contrast stays.
+          // >16MP: GPU stepped sampler on the main thread (fast, no JS convolution
+          // loops). Heavy JS denoise/sharpen skipped; cheap single-pass contrast stays.
+          px = resizePixels(srcPx,fd.w,fd.h,dw,dh);
           addLog("Skipping JS denoise/sharpen above 16MP (keeps UI responsive)","info");
           if(finalCt!==1.0){ addLog(`Contrast (×${finalCt.toFixed(2)})`,"info"); px=enhanceContrast(px,dw,dh,finalCt); }
         } else {
-          if(finalDn>0){ addLog(`Denoise (${finalDn.toFixed(2)}${isProgressive?" — remaining":""})`,"info"); await delay(20); px=applyDenoise(px,dw,dh,finalDn); }
-          if(finalCt!==1.0){ addLog(`Contrast (×${finalCt.toFixed(2)}${isProgressive?" — remaining":""})`,"info"); px=enhanceContrast(px,dw,dh,finalCt); }
-          if(sh>0){ addLog(`Sharpen (${sh.toFixed(1)})`,"info"); await delay(20); px=applyUnsharpMask(px,dw,dh,sh); }
+          // ≤16MP: run resize + filters in a Web Worker so the main thread never
+          // freezes; fall back to the identical inline core if Worker is unavailable.
+          const params={srcPx,sw:fd.w,sh:fd.h,dw,dh,algo:al,denoise:finalDn,contrast:finalCt,sharpen:sh};
+          addLog(`Enhancing off-thread: ${al} + denoise ${finalDn.toFixed(2)} · contrast ×${finalCt.toFixed(2)} · sharpen ${sh.toFixed(1)}`,"info");
+          await delay(20);
+          try { px = await enhanceImage(params); addLog("Enhanced off the main thread (worker)","ok"); }
+          catch(werr){ addLog(`Worker unavailable (${werr.message}) — inline fallback`,"warn"); px = runEnhancePixels(params); }
         }
         const out=document.createElement("canvas"); out.width=dw; out.height=dh;
         out.getContext("2d").putImageData(new ImageData(px,dw,dh),0,0);
