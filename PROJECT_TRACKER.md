@@ -71,16 +71,22 @@ PDF), pick a scale, run a multi-stage pipeline (ingest → scan → analysis →
       above 16MP (no-freeze guard), benchmark-safe `target` precedence. Tests:
       `test/targetDims.test.mjs` 10/10 + regression 14/14, build green. ⚠️ Needs a
       MANUAL browser check (8K actually emerges, UI stays responsive).
-- [ ] **No-freeze pipeline** — move the IMAGE enhance stage into a Web Worker w/
-      `OffscreenCanvas` so big jobs never block the main thread (the 16MP skip is a
-      mitigation, NOT the full Worker move). Pattern already in `pdfWorker.js`.
+- [x] **No-freeze image pipeline** (2026-06-08, commit `416a0c4`) — the ≤16MP image
+      path now runs resize + denoise/contrast/sharpen in a Web Worker (`imageWorker.js`)
+      so the main thread never freezes. Shared PURE core `enhancePixels.js` used by
+      both the worker AND an inline fallback (identical output; never breaks if Worker
+      is unavailable). `test/enhancePixels.test.mjs` proves no-filter output is
+      byte-identical to bicubic alone (behavior-preserving). ⚠️ off-thread behavior
+      only confirms in-browser.
 - [x] **Real PDF upscaling — page-1 v1** (2026-06-05, commit `fa68a75`) — wired the
       worker into the enhance branch: decode `fd.b64`→Uint8Array (fixed the
       `new Blob([fd])` object bug), `{type:'module'}` worker, `vite worker.format:'es'`
-      so the code-splitting worker bundles. Preview shows the upscaled page 1;
-      download → `_page1.png`. ⚠️ UNVERIFIED — needs a manual browser check (pdf.js
-      only renders in-browser). Multi-page export (option B, ZIP/gallery) is the
-      follow-up — see `PDF-UPSCALER-TASK.md`.
+      so the code-splitting worker bundles. ⚠️ UNVERIFIED in-browser (pdf.js renders
+      in-browser only).
+- [x] **Multi-page PDF export — option B** (2026-06-08, commit `c17e60b`) — keeps all
+      upscaled pages; preview pager (◀ n/m ▶), per-page PNG download, and ALL-PAGES
+      ZIP via dependency-free `pdfZip.js` (STORE + CRC32). `test/pdfZip.test.mjs`
+      builds a real archive that the SYSTEM `unzip -t` accepts. ⚠️ in-browser pass pending.
 - [x] **Completely offline** (2026-06-05, commit `6776432`) — dropped the Google
       Fonts CDN `@import` (the only live network dependency; CSP already blocked it).
       Zero network surface now; renders on local font fallbacks, no visual change.
@@ -91,5 +97,19 @@ PDF), pick a scale, run a multi-stage pipeline (ingest → scan → analysis →
 - [x] **Ship to GitHub** (2026-06-04) — `.gitignore` node_modules/dist, `git rm
       -r --cached node_modules`, added remote, reconciled + pushed to
       `rled7/nexus-scale` (clean single-history, up to commit `eb96358`).
+- [ ] (optional polish) **Restore display fonts offline** — bundle Share Tech Mono
+      + Orbitron `.woff2` locally + `@font-face` to recover the exact look (currently
+      on system fallbacks). BLOCKED on obtaining the font binaries (no CDN at runtime).
 - [ ] (stretch) **WebAssembly hot path** — port the bicubic/convolution kernels
       to C/Rust → Wasm for a big speedup on large images (see notes).
+
+## 7. Status (2026-06-08): feature-complete pending browser verification
+All requested + roadmap features are wired, built green, and unit-tested. The ONLY
+gate to "done" is a manual browser pass (image enhancement only truly exercises in a
+browser). **Browser-check list:**
+1. Load a large image → pick **8K** → confirm it emerges at the right size + the UI
+   stays responsive (no-freeze worker) → download names it `nexusscale_8K_*`.
+2. Load a multi-page PDF → run → confirm pages render upscaled, the **pager** works,
+   **THIS PAGE (PNG)** + **ALL PAGES (ZIP)** download (open the ZIP).
+3. Confirm offline: DevTools Network shows zero external requests.
+Remaining after that = optional polish (fonts) + the WASM stretch.
