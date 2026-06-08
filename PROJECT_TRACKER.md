@@ -74,11 +74,16 @@ PDF), pick a scale, run a multi-stage pipeline (ingest → scan → analysis →
 - [ ] **No-freeze pipeline** — move the IMAGE enhance stage into a Web Worker w/
       `OffscreenCanvas` so big jobs never block the main thread (the 16MP skip is a
       mitigation, NOT the full Worker move). Pattern already in `pdfWorker.js`.
-- [ ] **Real PDF upscaling** — wire the (intact) worker. See `PDF-UPSCALER-TASK.md`
-      for the full spec. Key bugs found 2026-06-05: `enhancePDF` passes the `fd`
-      OBJECT to `new Blob([fd])` (yields "[object Object]", not bytes) → must decode
-      `fd.b64`→Uint8Array; worker created without `{type:'module'}`; multi-page
-      output vs single-result UX is an OPEN DECISION.
+- [x] **Real PDF upscaling — page-1 v1** (2026-06-05, commit `fa68a75`) — wired the
+      worker into the enhance branch: decode `fd.b64`→Uint8Array (fixed the
+      `new Blob([fd])` object bug), `{type:'module'}` worker, `vite worker.format:'es'`
+      so the code-splitting worker bundles. Preview shows the upscaled page 1;
+      download → `_page1.png`. ⚠️ UNVERIFIED — needs a manual browser check (pdf.js
+      only renders in-browser). Multi-page export (option B, ZIP/gallery) is the
+      follow-up — see `PDF-UPSCALER-TASK.md`.
+- [x] **Completely offline** (2026-06-05, commit `6776432`) — dropped the Google
+      Fonts CDN `@import` (the only live network dependency; CSP already blocked it).
+      Zero network surface now; renders on local font fallbacks, no visual change.
 - [x] **Removed the "AI (API KEY)" browser-fetch mode** (2026-06-04) — analysis
       is now 100% local; eliminated the client-side API-key exposure risk.
 - [x] **Bundled pdf.js locally** (2026-06-04) — added `pdfjs-dist`, dropped the
