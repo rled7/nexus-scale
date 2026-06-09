@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node test/run-all.mjs"
+    "test": "node test/run-all.mjs",
+    "bench": "node test/cache.bench.mjs"
   },
   "dependencies": {
     "@fontsource/orbitron": "^5.2.8",

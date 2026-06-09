@@ -191,6 +191,9 @@ export default function NexusScale(){
     // callers (e.g. the benchmark suite) must not inherit a UI-selected target from
     // state, so they default to multiplier mode unless they explicitly pass `target`.
     const tg  =cfgOverride ? (cfgOverride.target ?? null) : target;
+    // Skip the result cache for programmatic callers (the benchmark measures
+    // wall-clock time — a cache hit would report ~0ms and corrupt the comparison).
+    const useCache = !cfgOverride;
     const al  =cfgOverride?.algo    ??algo;
     const sh  =cfgOverride?.sharpen ??sharpen;
     const dn  =cfgOverride?.denoise ??denoise;
@@ -396,10 +399,10 @@ export default function NexusScale(){
         // Cache key = file fingerprint (name|size|dims) + every param that changes
         // the output. A hit returns the finished PNG and skips resize+filters+encode.
         const cacheKey = keyOf({ fp:`${fd.name}|${fd.size}|${fd.w}x${fd.h}`, dw, dh, algo:al, dn:finalDn, ct:finalCt, sh, big, prog:isProgressive });
-        const hit = enhanceCache.get(cacheKey);
+        const hit = useCache ? enhanceCache.get(cacheKey) : undefined;
         if(hit){
           resultUrl=hit.url; rw=hit.w; rh=hit.h;
-          addLog(`Cache hit — reused enhanced ${hit.w}×${hit.h}px (skipped recompute)`,"ok");
+          addLog(`Cache hit — reused enhanced ${hit.w}×${hit.h}px (skipped resize/filters/encode)`,"ok");
         } else {
           let px;
           if(big){
@@ -421,7 +424,7 @@ export default function NexusScale(){
           out.getContext("2d").putImageData(new ImageData(px,dw,dh),0,0);
           resultUrl=out.toDataURL("image/png");
           rw=dw; rh=dh;
-          enhanceCache.set(cacheKey, { url:resultUrl, w:rw, h:rh });
+          if(useCache) enhanceCache.set(cacheKey, { url:resultUrl, w:rw, h:rh });
           addLog(`Enhancement complete → ${dw}×${dh}px`,"ok");
           if (isProgressive) {
             setStageSnapshots(prev => [...prev, { stage: "enhance", label: "Enhanced", thumb: makeThumbnail(px, dw, dh) }]);
