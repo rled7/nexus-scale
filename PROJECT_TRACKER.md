@@ -117,4 +117,23 @@ browser. **Browser-check list (ordered by risk):**
 
 Note: "no-freeze" moved the convolutions off-thread, but `getImageData`/`toDataURL`
 on up-to-16MP still run on main — a brief hitch while PNG-encoding a big result is the
-ENCODE, not a worker failure. Remaining after the pass = WASM stretch only.
+ENCODE, not a worker failure.
+
+## 8. Performance (2026-06-08): measured, not assumed
+A portable caching suite (`cache/`, reusable in other apps) + cold-path kernel
+optimization. All numbers are node-measured; outputs verified byte-identical.
+- **Cache (repeat ops):** `npm run bench` — re-running identical file+settings is a
+  cache hit: **~67,000× faster** (3230ms → 0.05ms). Integrated into the enhance stage,
+  byte-budgeted (256MB), bypassed for the timing benchmark.
+- **Cold path (first-time ops), profiled then fixed:**
+  - bicubic resize recomputed 16 weights per-channel-per-pixel → precompute per
+    row/col: **6.1×** (730→120ms @800×600), 0 LSB diff.
+  - denoise box-blur O(r²)→O(1) separable running-sum: **2.3–4.2×**, now flat vs strength.
+  - unsharp 3×3: precompute row bases + inline kernel: **~3.8×** (173→45ms).
+  - **Cumulative: the full 256→1024 enhance chain went 3230ms → 457ms (7.1×).**
+- **Regression lock:** `test/kernels-golden.test.mjs` hashes each kernel's output to a
+  golden constant so future refactors can't silently change image output.
+- **Next measurable wins (not yet done):** route ≤16MP through the canvas/GPU sampler
+  (needs browser to measure); WASM kernels (stretch).
+
+Remaining after the browser pass = WASM stretch only. Tests: **73 checks / 7 files**.
