@@ -103,17 +103,29 @@ PDF), pick a scale, run a multi-stage pipeline (ingest → scan → analysis →
 - [ ] (stretch) **WebAssembly hot path** — port the bicubic/convolution kernels
       to C/Rust → Wasm for a big speedup on large images (see notes).
 
-## 7. Status (2026-06-08): feature-complete pending browser verification
+## 7. Status (2026-06-09): feature-complete; objective browser checks now AUTOMATED
 All requested + roadmap features (8K/4K, PDF upscaler + multi-page ZIP, fully-offline,
-no-freeze worker, local fonts) are wired, built green, and unit-tested. The ONLY gate
-to "done" is a manual browser pass — image/PDF rendering only truly exercises in a
-browser. **Browser-check list (ordered by risk):**
+no-freeze worker, local fonts) are wired, built green, and unit-tested.
+
+**`npm run test:e2e`** (`test/e2e.smoke.mjs`, puppeteer-core driving the system Chrome —
+devDep only, NOT in `npm test`) now mechanically settles the objective subset of the
+browser pass, in a real browser running the real built app:
+- ✅ **8K image** — a generated 160×90 PNG upscaled to **exactly 7680×4320** through the
+  actual canvas pipeline (closes check 3).
+- ✅ **Offline** — request interception confirms **zero external network requests**
+  (closes check 4).
+- ✅ App loads with **no uncaught page errors**, on load and across the 8K run.
+
+**Still needs a human glance (visual quality — not mechanically checkable):**
 1. **PDF render (highest risk — salvaged pdf.js v6 worker):** load a multi-page PDF →
-   run → confirm pages render visibly upscaled. If this works, the PDF feature is live.
+   run → confirm pages render **visibly** upscaled. Not automated (hand-fixturing a
+   pdf.js-parseable multi-page PDF + judging visual fidelity is the human part).
 2. **Multi-page controls:** the **pager** (◀ n/m ▶) cycles pages; **THIS PAGE (PNG)**
    and **ALL PAGES (ZIP)** both download — open the ZIP to confirm it's valid.
-3. **8K image:** big image → **8K** → emerges at size, file named `nexusscale_8K_*`.
-4. **Offline:** DevTools Network shows zero external requests.
+   (`pdfZip.test.mjs` already proves the ZIP bytes pass system `unzip -t`; this is the
+   in-browser download/UX glance.)
+3. ~~8K image~~ — now automated (above).
+4. ~~Offline~~ — now automated (above).
 
 Note: "no-freeze" moved the convolutions off-thread, but `getImageData`/`toDataURL`
 on up-to-16MP still run on main — a brief hitch while PNG-encoding a big result is the
