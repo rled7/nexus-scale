@@ -27,7 +27,9 @@ self.onmessage = async (e) => {
     const workerUrl = (await import('pdfjs-dist/build/pdf.worker.min.mjs?url')).default;
     pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
-    const pdf = await pdfjs.getDocument(pdfData).promise;
+    // pdf.js v6 requires a params object ({ data }) — a bare Uint8Array is no
+    // longer accepted (older API did, which is why the salvaged worker broke).
+    const pdf = await pdfjs.getDocument({ data: pdfData }).promise;
     const pages = [];
 
     for (let i = 1; i <= pdf.numPages; i++) {
